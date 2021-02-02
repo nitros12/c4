@@ -394,6 +394,8 @@ fn perform() {
         }
     }
 
+    game.state().render();
+
     println!("{:?}", game.winner());
 }
 
