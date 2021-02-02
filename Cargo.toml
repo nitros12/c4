@@ -1,0 +1,12 @@
+[package]
+name = "c4"
+version = "0.1.0"
+authors = ["Ben Simms <ben@bensimms.moe>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+dialoguer = "0.7.1"
+num_enum = "0.5.1"
+rubot = "0.3.0"
