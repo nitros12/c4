@@ -346,13 +346,14 @@ impl rubot::Game for Game {
 
 fn perform() {
     let colours = &[Colour::Red, Colour::Yellow];
+    let player_opts = &[Some(Colour::Red), Some(Colour::Yellow), None];
 
     let human_player = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
         .with_prompt("Play as")
-        .items(&["Red", "Yellow"])
+        .items(&["Red", "Yellow", "Bot v Bot"])
         .interact()
         .unwrap();
-    let human_player = colours[human_player];
+    let human_player = player_opts[human_player];
 
     let first_player = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
         .with_prompt("Who goes first")
@@ -360,15 +361,37 @@ fn perform() {
         .interact()
         .unwrap();
 
+    let think_time: u64 = dialoguer::Input::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Bot think time")
+        .default(5)
+        .interact()
+        .unwrap();
+
     let mut game = Game::new(colours[first_player]);
 
-    let mut bot = rubot::Bot::new(Colour::Yellow);
+    let (red_bot, yellow_bot) = match human_player {
+        Some(Colour::Red) => (false, true),
+        Some(Colour::Yellow) => (true, false),
+        None => (true, true),
+    };
+
+    let mut red_bot = if red_bot {
+        Some(rubot::Bot::new(Colour::Red))
+    } else {
+        None
+    };
+
+    let mut yellow_bot = if yellow_bot {
+        Some(rubot::Bot::new(Colour::Yellow))
+    } else {
+        None
+    };
 
     while !game.is_finished() {
         println!("Game State:");
         game.state().render();
 
-        if game.current_colour() == human_player {
+        if Some(game.current_colour()) == human_player {
             let items = game.state().allowed_columns();
             let chosen = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
                 .with_prompt("Your turn")
@@ -378,18 +401,14 @@ fn perform() {
 
             game.make_move(items[chosen]).unwrap();
         } else {
-            // println!("Yellow's Turn");
-            // let items = game.state().allowed_columns();
-            // let chosen =
-            //     dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-            //         .items(&items)
-            //         .interact()
-            //         .unwrap();
-
-            // game.make_move(items[chosen]).unwrap();
 
             println!("Bot's Turn");
-            let action = bot.select(&game, Duration::from_secs(5)).unwrap();
+            let bot = if game.current_colour() == Colour::Red {
+                red_bot.as_mut().unwrap()
+            } else {
+                yellow_bot.as_mut().unwrap()
+            };
+            let action = bot.select(&game, Duration::from_secs(think_time)).unwrap();
             game.make_move(action).unwrap();
         }
     }
