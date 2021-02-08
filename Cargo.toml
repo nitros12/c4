@@ -10,6 +10,8 @@ edition = "2018"
 lto = "fat"
 
 [dependencies]
+bitvec = "0.20.1"
 dialoguer = "0.7.1"
 num_enum = "0.5.1"
-rubot = { git = "https://github.com/nitros12/rubot", rev = "9f111deecfcbe8127a4a9a366fc175e2e2310be4" }
+rubot = "0.3.0"
+# rubot = { git = "https://github.com/nitros12/rubot", rev = "9f111deecfcbe8127a4a9a366fc175e2e2310be4" }

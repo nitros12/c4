@@ -1,6 +1,9 @@
+#![feature(type_alias_impl_trait)]
+
 use std::convert::TryInto;
 use std::time::Duration;
 
+use bitvec::prelude::*;
 use dialoguer;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use rubot;
@@ -19,6 +22,21 @@ impl Colour {
         match self {
             Colour::Red => Colour::Yellow,
             Colour::Yellow => Colour::Red,
+        }
+    }
+
+    fn to_bool(self) -> bool {
+        match self {
+            Colour::Red => true,
+            Colour::Yellow => false,
+        }
+    }
+
+    fn from_bool(v: bool) -> Colour {
+        if v {
+            Colour::Red
+        } else {
+            Colour::Yellow
         }
     }
 }
@@ -67,6 +85,7 @@ pub enum Column {
     D,
     E,
     F,
+    G,
 }
 
 impl std::fmt::Display for Column {
@@ -78,6 +97,7 @@ impl std::fmt::Display for Column {
             Column::D => "D",
             Column::E => "E",
             Column::F => "F",
+            Column::G => "G",
         };
 
         write!(f, "{}", col)
@@ -110,22 +130,74 @@ impl Column {
             Column::D,
             Column::E,
             Column::F,
+            Column::G,
         ];
 
         ALL
     }
 }
 
+// const fn max(a: usize, b: usize) -> usize {
+//     if a < b {
+//         b
+//     } else {
+//         a
+//     }
+// }
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Board {
+    // eventually: heights: [u8; max(BOARD_HEIGHT, BOARD_WIDTH)],
     heights: [u8; BOARD_WIDTH],
-    tiles: [[Option<Colour>; BOARD_HEIGHT]; BOARD_WIDTH],
+    present: bitarr![for BOARD_HEIGHT * BOARD_WIDTH],
+    tiles: bitarr![for BOARD_HEIGHT * BOARD_WIDTH],
+}
+
+struct AllowedColumnsIterator {
+    allowed: bitarr![for BOARD_WIDTH],
+}
+
+impl AllowedColumnsIterator {
+    fn from_board(board: &Board) -> Self {
+        let mut allowed = bitarr![0; BOARD_WIDTH];
+
+        for col in Column::all() {
+            if !board.column_full(*col) {
+                allowed.set(col.to_idx(), true);
+            }
+        }
+
+        Self { allowed }
+    }
+
+    fn new_empty() -> Self {
+        Self {
+            allowed: Default::default(),
+        }
+    }
+}
+
+impl IntoIterator for AllowedColumnsIterator {
+    type Item = Column;
+
+    type IntoIter = impl Iterator<Item = Column>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.allowed.into_iter().enumerate().filter_map(|(idx, c)| {
+            if c {
+                Some((idx as u8).try_into().unwrap())
+            } else {
+                None
+            }
+        })
+    }
 }
 
 impl Board {
     fn new() -> Self {
         Self {
             heights: Default::default(),
+            present: Default::default(),
             tiles: Default::default(),
         }
     }
@@ -138,21 +210,28 @@ impl Board {
         self.column_height(column) >= BOARD_HEIGHT as u8
     }
 
+    fn index_of(column: Column, height: u8) -> usize {
+        column.to_idx() + height as usize * BOARD_WIDTH
+    }
+
     fn place_on_column(&mut self, column: Column, colour: Colour) {
-        self.tiles[column.to_idx()][self.column_height(column) as usize] = Some(colour);
+        let idx = Board::index_of(column, self.column_height(column));
+        self.tiles.set(idx, colour.to_bool());
+        self.present.set(idx, true);
         self.heights[column.to_idx()] += 1;
     }
 
     fn piece_at(&self, column: Column, height: u8) -> Option<Colour> {
-        self.tiles[column.to_idx()][height as usize]
+        let idx = Board::index_of(column, height);
+        if self.present[idx] {
+            Some(Colour::from_bool(self.tiles[idx]))
+        } else {
+            None
+        }
     }
 
-    fn allowed_columns(&self) -> Vec<Column> {
-        Column::all()
-            .iter()
-            .cloned()
-            .filter(|c| !self.column_full(*c))
-            .collect()
+    fn allowed_columns(&self) -> AllowedColumnsIterator {
+        AllowedColumnsIterator::from_board(self)
     }
 
     fn render(&self) {
@@ -313,11 +392,11 @@ impl rubot::Game for Game {
     type Player = Colour;
     type Action = Column;
     type Fitness = Fitness;
-    type Actions = Vec<Column>;
+    type Actions = AllowedColumnsIterator;
 
     fn actions(&self, player: Self::Player) -> (bool, Self::Actions) {
         let actions = if self.is_finished() {
-            vec![]
+            AllowedColumnsIterator::new_empty()
         } else {
             self.state.allowed_columns()
         };
@@ -392,7 +471,11 @@ fn perform() {
         game.state().render();
 
         if Some(game.current_colour()) == human_player {
-            let items = game.state().allowed_columns();
+            let items = game
+                .state()
+                .allowed_columns()
+                .into_iter()
+                .collect::<Vec<_>>();
             let chosen = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
                 .with_prompt("Your turn")
                 .items(&items)
@@ -401,7 +484,6 @@ fn perform() {
 
             game.make_move(items[chosen]).unwrap();
         } else {
-
             println!("Bot's Turn");
             let bot = if game.current_colour() == Colour::Red {
                 red_bot.as_mut().unwrap()
