@@ -151,6 +151,7 @@ struct Board {
     heights: [u8; BOARD_WIDTH],
     present: bitarr![for BOARD_HEIGHT * BOARD_WIDTH],
     tiles: bitarr![for BOARD_HEIGHT * BOARD_WIDTH],
+    gravity_down: bool,
 }
 
 struct AllowedColumnsIterator {
@@ -199,6 +200,7 @@ impl Board {
             heights: Default::default(),
             present: Default::default(),
             tiles: Default::default(),
+            gravity_down: true,
         }
     }
 
@@ -211,11 +213,18 @@ impl Board {
     }
 
     fn index_of(column: Column, height: u8) -> usize {
-        column.to_idx() + height as usize * BOARD_WIDTH
+        column.to_idx() * BOARD_HEIGHT + height as usize
     }
 
     fn place_on_column(&mut self, column: Column, colour: Colour) {
-        let idx = Board::index_of(column, self.column_height(column));
+        let height = self.column_height(column);
+        let height = if self.gravity_down {
+            height
+        } else {
+            BOARD_HEIGHT as u8 - (height + 1)
+        };
+
+        let idx = Board::index_of(column, height);
         self.tiles.set(idx, colour.to_bool());
         self.present.set(idx, true);
         self.heights[column.to_idx()] += 1;
@@ -245,6 +254,12 @@ impl Board {
 
             println!("");
         }
+
+        for c in Column::all() {
+            print!("{}", c);
+        }
+
+        println!("");
     }
 }
 
@@ -269,14 +284,18 @@ struct Game {
     state: Board,
     current_colour: Colour,
     winner: Option<Winner>,
+    flipping: bool,
+    round: u8,
 }
 
 impl Game {
-    fn new(starting_colour: Colour) -> Self {
+    fn new(starting_colour: Colour, flipping: bool) -> Self {
         Self {
             state: Board::new(),
             current_colour: starting_colour,
             winner: None,
+            flipping,
+            round: 0,
         }
     }
 
@@ -291,21 +310,80 @@ impl Game {
 
         self.state.place_on_column(column, self.current_colour);
 
-        let colour = self.current_colour;
         self.current_colour = self.current_colour.invert();
 
-        if let Some(winner) = self.check_win(column, colour) {
+        let height = self.state.column_height(column) - 1;
+
+        if let Some(winner) = self.check_win(column, height) {
+            self.winner = Some(winner);
+        }
+
+        if self.winner.is_some() {
+            return Ok(());
+        }
+
+        self.round += 1;
+
+        if self.round == 2 && self.flipping {
+            self.round = 0;
+            self.flip()
+        }
+
+        if let Some(winner) = self.check_win_all() {
             self.winner = Some(winner);
         }
 
         Ok(())
     }
 
-    fn check_win(&self, column: Column, colour: Colour) -> Option<Winner> {
-        let height = self.state.column_height(column);
+    fn flip(&mut self) {
+        for &column in Column::all() {
+            let idx = Board::index_of(column, 0);
 
-        assert!(height >= 1);
-        let last_placed = height - 1;
+            if self.state.column_height(column) == 0 {
+                continue;
+            }
+
+            let shift = BOARD_HEIGHT - self.state.column_height(column) as usize;
+
+            let present = &mut self.state.present[idx..idx + BOARD_HEIGHT];
+            let tiles = &mut self.state.tiles[idx..idx + BOARD_HEIGHT];
+
+            // println!("tiles before {:?} {} {}", present, column, shift);
+
+            if self.state.gravity_down {
+                // going up
+                present.shift_right(shift);
+                tiles.shift_right(shift);
+            } else {
+                // going down
+                present.shift_left(shift);
+                tiles.shift_left(shift);
+            }
+
+            // println!("tiles after {:?}", present);
+        }
+
+        self.state.gravity_down = !self.state.gravity_down;
+    }
+
+    fn check_win_all(&self) -> Option<Winner> {
+        for &c in Column::all() {
+            for h in 0..BOARD_HEIGHT {
+                if let Some(win) = self.check_win(c, h as u8) {
+                    return Some(win);
+                }
+            }
+        }
+
+        None
+    }
+
+    fn check_win(&self, column: Column, height: u8) -> Option<Winner> {
+        let colour = match self.state.piece_at(column, height) {
+            Some(c) => c,
+            None => return None,
+        };
 
         const DIRECTIONS: &[(i8, i8, usize)] = &[
             (-1, 1, 0),
@@ -333,7 +411,7 @@ impl Game {
                     Some(c) => c,
                     None => continue,
                 };
-                let check_row = match row_offset(last_placed, dy * depth) {
+                let check_row = match row_offset(height, dy * depth) {
                     Some(c) => c,
                     None => continue,
                 };
@@ -446,7 +524,14 @@ fn perform() {
         .interact()
         .unwrap();
 
-    let mut game = Game::new(colours[first_player]);
+    let flipping = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Gravity change")
+        .items(&["Never", "Every two rounds"])
+        .interact()
+        .unwrap();
+    let flipping = flipping == 1;
+
+    let mut game = Game::new(colours[first_player], flipping);
 
     let (red_bot, yellow_bot) = match human_player {
         Some(Colour::Red) => (false, true),
